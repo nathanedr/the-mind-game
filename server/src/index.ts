@@ -5,8 +5,27 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
-dotenv.config();
+// Chargement dynamique du .env (Racine ou Serveur)
+const envPaths = [
+    path.join(__dirname, '../../.env'), // Racine du projet
+    path.join(__dirname, '../.env')     // Dossier server
+];
+
+let envConfigured = false;
+for (const p of envPaths) {
+    if (fs.existsSync(p)) {
+        dotenv.config({ path: p });
+        console.log(`[CONFIG] Chargement .env depuis : ${p}`);
+        envConfigured = true;
+        break;
+    }
+}
+
+if (!envConfigured) {
+    console.log("[CONFIG] Aucun fichier .env trouvé. Mode Admin désactivé.");
+}
 
 const app = express();
 app.use(cors());
@@ -158,11 +177,11 @@ io.on('connection', (socket) => {
         
         let isAdmin = false;
         const adminNames = (process.env.ADMIN_NAMES || "").split(',').map(n => n.trim());
-        const adminPassword = process.env.ADMIN_PASSWORD || "MindLink16";
+        const adminPassword = process.env.ADMIN_PASSWORD;
 
         console.log(`Create attempt: ${playerName}, AdminList: ${adminNames.join(',')}`);
 
-        if (adminNames.includes(playerName)) {
+        if (adminNames.includes(playerName) && adminPassword) {
             if (password === adminPassword) {
                 isAdmin = true;
             } else if (password) {
@@ -230,10 +249,10 @@ io.on('connection', (socket) => {
 
         let isAdmin = false;
         const adminNames = (process.env.ADMIN_NAMES || "").split(',').map(n => n.trim());
-        const adminPassword = process.env.ADMIN_PASSWORD || "MindLink16";
+        const adminPassword = process.env.ADMIN_PASSWORD;
 
         const isNathinho = playerName === "Nathinho";
-        const isPlayerAdminCandidate = adminNames.includes(playerName);
+        const isPlayerAdminCandidate = adminNames.includes(playerName) && !!adminPassword;
         
         // Check if Nathinho is already in the room as admin
         const nathinhoPresentAndAdmin = room.players.some(p => p.name === "Nathinho" && p.isAdmin);
