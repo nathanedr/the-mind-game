@@ -502,7 +502,7 @@ io.on('connection', (socket) => {
                 ownerOfLowest: ownerOfLowestName
             });
 
-            if (room.gameState.lives <= 0) {
+            if (room.gameState.lives < 0) { // Correction: Perdu seulement si vies < 0 (donc à -1)
                 room.gameState.status = 'waiting';
                 room.gameState.lastGameResult = { won: false, level: room.gameState.level };
                 
