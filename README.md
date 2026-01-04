@@ -1,6 +1,6 @@
-# 🧠 The Mind - Web Edition
+# 🧠 MindLink - Web Edition
 
-Une adaptation web du célèbre jeu de société coopératif **The Mind**.  
+Une adaptation web du célèbre jeu de société coopératif **MindLink**.  
 Ce projet permet de jouer de **2 à 7 joueurs** en temps réel, directement depuis un navigateur.
 
 ## 📖 Règles du Jeu

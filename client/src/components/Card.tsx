@@ -17,13 +17,13 @@ export const Card = ({ value, onClick, isPlayable = false, isPile = false, compa
             className={clsx(
                 "relative flex items-center justify-center font-bold rounded-xl shadow-2xl border-4 select-none transition-colors",
                 isPile 
-                    ? "w-40 h-60 md:w-48 md:h-72 text-7xl md:text-8xl bg-gradient-to-br from-slate-100 to-slate-300 text-slate-900 border-white z-10" 
+                    ? "w-32 h-48 text-6xl md:w-48 md:h-72 md:text-8xl bg-gradient-to-br from-slate-100 to-slate-300 text-slate-900 border-white z-10" 
                     : compact
-                        ? "w-16 h-24 md:w-20 md:h-32 text-2xl md:text-3xl bg-gradient-to-br from-white to-slate-200 text-slate-800 border-white"
-                        : "w-24 h-36 md:w-28 md:h-44 text-4xl md:text-5xl bg-gradient-to-br from-white to-slate-200 text-slate-800 border-white",
-                isPlayable && "cursor-pointer hover:shadow-emerald-500/50 hover:border-emerald-200"
+                        ? "w-12 h-16 text-xl md:w-20 md:h-32 md:text-3xl bg-gradient-to-br from-white to-slate-200 text-slate-800 border-white"
+                        : "w-20 h-32 text-3xl md:w-28 md:h-44 md:text-5xl bg-gradient-to-br from-white to-slate-200 text-slate-800 border-white",
+                isPlayable && "cursor-pointer md:hover:shadow-emerald-500/50 md:hover:border-emerald-200 active:scale-95"
             )}
-            whileHover={!disableAnimations && isPlayable ? { y: compact ? -20 : -30, scale: 1.1, rotate: Math.random() * 4 - 2, zIndex: 50 } : {}}
+            whileHover={!disableAnimations && isPlayable ? { y: -15, scale: 1.1, rotate: Math.random() * 4 - 2, zIndex: 50 } : {}}
             whileTap={!disableAnimations && isPlayable ? { scale: 0.95 } : {}}
             onClick={onClick}
             initial={!disableAnimations && !isPile ? { y: 100, opacity: 0 } : undefined}

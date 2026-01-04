@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { socket } from './socket';
 import { useGameStore } from './store';
 import { Lobby } from './components/Lobby';
@@ -6,6 +6,8 @@ import { Card } from './components/Card';
 import { Opponent } from './components/Opponent';
 import { GameOverModal } from './components/GameOverModal';
 import { Notification } from './components/Notification';
+import { RulesModal } from './components/RulesModal';
+import { PileHistoryModal } from './components/PileHistoryModal';
 import { useGameSounds } from './hooks/useGameSounds.ts';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -22,7 +24,8 @@ function App() {
     setConnected, 
     setHand, 
     setGameInfo,
-    setHostId
+    setHostId,
+    setIsAdmin
   } = useGameStore();
 
   const [shake, setShake] = useState(false);
@@ -31,6 +34,12 @@ function App() {
   const [shurikenAnimation, setShurikenAnimation] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [kicked, setKicked] = useState(false);
+  const [showPileHistory, setShowPileHistory] = useState(false);
+  
+  // Admin X-Ray features
+  const [xrayEnabled, setXrayEnabled] = useState(false);
+  const [xrayTemporarilyDisabled, setXrayTemporarilyDisabled] = useState(false);
+  const lastPileLength = useRef(0);
   
   const sounds = useGameSounds();
 
@@ -45,6 +54,12 @@ function App() {
 
     function onUpdatePlayers(updatedPlayers: any[]) {
         setPlayers(updatedPlayers);
+        
+        // Sync local isAdmin state
+        const myPlayer = updatedPlayers.find(p => p.id === socket.id);
+        if (myPlayer) {
+            setIsAdmin(myPlayer.isAdmin);
+        }
         sounds.playJoinSound();
     }
 
@@ -57,6 +72,12 @@ function App() {
         setGameInfo(data.gameState);
         setPlayers(data.players);
         if (data.hostId) setHostId(data.hostId);
+
+        // X-Ray Logic: Si une carte est jouée (pile augmente), on réactive le X-Ray
+        if (data.gameState.currentPile.length > lastPileLength.current) {
+            setXrayTemporarilyDisabled(false);
+        }
+        lastPileLength.current = data.gameState.currentPile.length;
 
         // Si la partie redémarre, on ferme la modale de fin de partie pour tout le monde
         if (data.gameState.status === 'playing') {
@@ -87,6 +108,7 @@ function App() {
         setNotification(`SHURIKEN ! Cartes défaussées : ${msg}`);
         sounds.playShurikenSound();
         setShurikenAnimation(true);
+        setXrayTemporarilyDisabled(true); // Désactiver X-Ray temporairement
         setTimeout(() => setShurikenAnimation(false), 1000);
     }
 
@@ -194,7 +216,12 @@ function App() {
   }
 
   if (!roomId) {
-    return <Lobby />;
+    return (
+        <>
+            <Lobby />
+            <RulesModal />
+        </>
+    );
   }
 
   // Séparer les adversaires de moi-même
@@ -279,7 +306,19 @@ function App() {
         <header className="flex justify-between items-center mb-4 md:mb-8 z-50 relative">
             <div className="flex flex-col gap-1">
                 <div>
-                    <h1 className="text-xl md:text-2xl font-bold">Room: <span className="text-emerald-400">{roomId}</span></h1>
+                    <div className="flex items-center gap-2">
+                        <h1 className="text-xl md:text-2xl font-bold">Room: <span className="text-emerald-400">{roomId}</span></h1>
+                        <button 
+                            onClick={() => {
+                                navigator.clipboard.writeText(roomId);
+                                setNotification("Code copié !");
+                            }}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-600 hover:border-emerald-500 p-1.5 rounded-lg transition-all active:scale-95"
+                            title="Copier le code"
+                        >
+                            📋
+                        </button>
+                    </div>
                     <div className="text-slate-400 text-xs md:text-sm">Joueurs: {players.length}/7</div>
                 </div>
                 {/* Volume Control */}
@@ -345,7 +384,29 @@ function App() {
                     <button onClick={() => adminAction('toggleTraining', 0)} className={clsx("text-xs py-2 rounded text-white", gameInfo.trainingMode ? "bg-green-600" : "bg-purple-700 hover:bg-purple-600")}>
                         {gameInfo.trainingMode ? "🎓 Training ON" : "🎓 Training OFF"}
                     </button>
+                    <button onClick={() => adminAction('toggleInvincible', 0)} className={clsx("text-xs py-2 rounded text-white", gameInfo.invincibleMode ? "bg-yellow-600 text-black font-bold" : "bg-slate-700 hover:bg-slate-600")}>
+                        {gameInfo.invincibleMode ? "🛡️ GOD MODE ON" : "🛡️ God Mode OFF"}
+                    </button>
+                    <button onClick={() => adminAction('skipLevel', 0)} className="bg-emerald-700 hover:bg-emerald-600 text-xs py-2 rounded text-white">⏩ Skip Level</button>
+                    <button onClick={() => adminAction('distract', 0)} className="bg-yellow-700 hover:bg-yellow-600 text-xs py-2 rounded text-white">⚡ Distract</button>
+                    <button onClick={() => {
+                        const msg = prompt("Message système :");
+                        if (msg) adminAction('broadcastMessage', msg);
+                    }} className="bg-cyan-700 hover:bg-cyan-600 text-xs py-2 rounded text-white hidden md:block">📢 Broadcast</button>
                     <button onClick={() => { if(confirm('Reset game?')) adminAction('reset', 0) }} className="bg-red-800 hover:bg-red-700 text-xs py-2 rounded text-white">⚠ Reset</button>
+                </div>
+
+                <div className="flex items-center gap-2 bg-slate-800 p-2 rounded">
+                    <input 
+                        type="checkbox" 
+                        id="xrayToggle" 
+                        checked={xrayEnabled} 
+                        onChange={(e) => setXrayEnabled(e.target.checked)}
+                        className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                    />
+                    <label htmlFor="xrayToggle" className="text-xs text-slate-300 cursor-pointer select-none flex-1">
+                        👁 X-Ray (Voir cartes)
+                    </label>
                 </div>
 
                 <div className="h-px bg-slate-700 my-1"></div>
@@ -391,6 +452,18 @@ function App() {
                             <span className="truncate max-w-[100px] text-white">{p.name}</span>
                             <div className="flex gap-1">
                                 <button 
+                                    onClick={() => {
+                                        const newName = prompt("Nouveau nom :", p.name);
+                                        if (newName && newName !== p.name) {
+                                            adminAction('renamePlayer', newName, p.id);
+                                        }
+                                    }}
+                                    className="bg-blue-900 text-blue-400 hover:bg-blue-800 px-1 rounded text-[10px]"
+                                    title="Renommer"
+                                >
+                                    ✎
+                                </button>
+                                <button 
                                     onClick={() => adminAction('forcePlay', 0, p.id)}
                                     className="bg-emerald-900 text-emerald-400 hover:bg-emerald-800 px-1 rounded text-[10px]"
                                     title="Forcer à jouer"
@@ -412,11 +485,11 @@ function App() {
         )}
 
         {/* GAME AREA */}
-        <div className="flex-1 flex flex-col items-center justify-between relative">
+        <div className="flex-1 flex flex-col items-center justify-between relative pb-16">
             
             {/* OPPONENTS AREA (TOP) */}
             {(gameInfo.status === 'playing' || gameInfo.status === 'paused' || gameInfo.status === 'shuriken_reveal') && (
-                <div className="flex justify-center gap-4 w-full flex-wrap mb-4">
+                <div className="flex justify-center gap-4 w-full flex-wrap mb-4 relative z-50">
                     {opponents.map(opponent => (
                         <Opponent 
                             key={opponent.id} 
@@ -424,6 +497,7 @@ function App() {
                             cardCount={opponent.cardCount}
                             hand={opponent.hand}
                             onForcePlay={isAdmin ? (cardValue) => adminAction('forcePlay', cardValue, opponent.id) : undefined}
+                            canXray={(xrayEnabled || !!gameInfo.trainingMode) && !xrayTemporarilyDisabled}
                         />
                     ))}
                 </div>
@@ -431,21 +505,22 @@ function App() {
 
             {/* WAITING ROOM */}
             {gameInfo.status === 'waiting' && (
-                <div className="text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl">
-                    <h2 className="text-4xl font-bold mb-12 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
+                <div className="text-center absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl max-h-screen overflow-y-auto p-4">
+                    <img src="/MindLink_logo.png" alt="MindLink Logo" className="w-32 md:w-48 h-auto mx-auto mb-4 md:mb-8" />
+                    <h2 className="text-2xl md:text-4xl font-bold mb-6 md:mb-12 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
                         {gameInfo.lastGameResult ? (gameInfo.lastGameResult.won ? "Victoire !" : "Défaite") : "En attente des joueurs..."}
                     </h2>
-                    <div className="flex flex-wrap justify-center gap-6 mb-12">
+                    <div className="flex flex-wrap justify-center gap-4 md:gap-6 mb-8 md:mb-12 max-h-[40vh] overflow-y-auto p-2">
                         {players.map(player => (
                             <motion.div 
                                 initial={{ scale: 0 }} animate={{ scale: 1 }}
                                 key={player.id} 
-                                className="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex flex-col items-center gap-3 min-w-[150px] shadow-xl"
+                                className="bg-slate-800 p-4 md:p-6 rounded-2xl border border-slate-700 flex flex-col items-center gap-2 md:gap-3 min-w-[120px] md:min-w-[150px] shadow-xl"
                             >
-                                <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-3xl font-bold shadow-inner">
+                                <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-2xl md:text-3xl font-bold shadow-inner">
                                     {player.name[0].toUpperCase()}
                                 </div>
-                                <div className="font-bold text-lg">{player.name}</div>
+                                <div className="font-bold text-base md:text-lg">{player.name}</div>
                                 {player.id === socket.id && <div className="text-xs text-emerald-400 font-mono bg-emerald-900/30 px-2 py-1 rounded">(Vous)</div>}
                                 {player.id === hostId && <div className="text-xs text-yellow-400 font-mono bg-yellow-900/30 px-2 py-1 rounded">Hôte</div>}
                             </motion.div>
@@ -453,24 +528,24 @@ function App() {
                     </div>
                     
                     {socket.id === hostId ? (
-                        <div className="flex flex-col gap-4 items-center">
+                        <div className="flex flex-col gap-4 items-center pb-8">
                             {gameInfo.lastGameResult && !gameInfo.lastGameResult.won && (
                                 <button 
                                     onClick={retryLevel}
-                                    className="px-12 py-4 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 rounded-2xl font-bold text-xl transition-all shadow-lg"
+                                    className="px-8 py-3 md:px-12 md:py-4 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 rounded-2xl font-bold text-lg md:text-xl transition-all shadow-lg"
                                 >
                                     RÉESSAYER NIVEAU {gameInfo.lastGameResult.level}
                                 </button>
                             )}
                             <button 
                                 onClick={startGame}
-                                className="px-12 py-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-2xl font-bold text-2xl transition-all shadow-lg shadow-emerald-900/50 hover:scale-105 active:scale-95"
+                                className="px-8 py-4 md:px-12 md:py-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-2xl font-bold text-xl md:text-2xl transition-all shadow-lg shadow-emerald-900/50 hover:scale-105 active:scale-95"
                             >
                                 {gameInfo.lastGameResult ? "RECOMMENCER (NIVEAU 1)" : "LANCER LA PARTIE"}
                             </button>
                         </div>
                     ) : (
-                        <div className="text-xl text-slate-400 animate-pulse">
+                        <div className="text-lg md:text-xl text-slate-400 animate-pulse pb-8">
                             En attente de l'hôte...
                         </div>
                     )}
@@ -537,10 +612,14 @@ function App() {
                     </AnimatePresence>
 
                     {/* PILE CENTRALE */}
-                    <div className="relative w-48 h-72 flex items-center justify-center">
+                    <div 
+                        className="relative w-32 h-48 md:w-48 md:h-72 flex items-center justify-center cursor-pointer group"
+                        onClick={() => setShowPileHistory(true)}
+                        title="Voir l'historique de la pile"
+                    >
                         {/* Placeholder pour la pile vide */}
-                        <div className="absolute inset-0 border-4 border-dashed border-slate-700 rounded-xl flex items-center justify-center">
-                            <span className="text-slate-700 font-bold text-xl">PILE</span>
+                        <div className="absolute inset-0 border-4 border-dashed border-slate-700 rounded-xl flex items-center justify-center group-hover:border-slate-500 transition-colors">
+                            <span className="text-slate-700 font-bold text-lg md:text-xl group-hover:text-slate-500 transition-colors">PILE</span>
                         </div>
 
                         {/* Cartes jouées */}
@@ -554,13 +633,18 @@ function App() {
                                 </div>
                             ))}
                         </AnimatePresence>
+                        
+                        {/* Indication visuelle au survol */}
+                        <div className="absolute -bottom-12 md:-bottom-16 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-slate-400 text-xs md:text-sm flex items-center gap-1 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700 backdrop-blur-sm pointer-events-none z-[100] whitespace-nowrap">
+                            <span>🔍</span> Cliquer sur la pile pour voir l'historique
+                        </div>
                     </div>
                 </div>
             )}
 
             {/* MA MAIN (BOTTOM) */}
             {(gameInfo.status === 'playing' || gameInfo.status === 'paused' || gameInfo.status === 'shuriken_reveal') && (
-                <div className="w-full max-w-6xl mx-auto pb-4 relative">
+                <div className="w-full max-w-6xl mx-auto pb-4 relative z-30">
                     {/* BOUTON SHURIKEN */}
                     {gameInfo.shurikens > 0 && !gameInfo.shurikenVote?.active && (
                         <button 
@@ -572,16 +656,15 @@ function App() {
                         </button>
                     )}
 
-                    <div className="text-center mb-2 text-slate-400 text-sm uppercase tracking-widest">Votre main</div>
                     <div className={clsx(
-                        "flex justify-center items-end transition-all duration-300 px-4 overflow-x-auto py-4 mx-auto",
-                        hand.length > 12 ? "h-40 -space-x-8 hover:-space-x-4" : 
-                        hand.length > 8 ? "h-40 -space-x-6 hover:-space-x-2" : 
-                        "h-48 -space-x-4 hover:space-x-2"
+                        "flex justify-center items-end transition-all duration-300 px-4 overflow-x-auto pb-4 pt-4 md:pt-12 mx-auto custom-scrollbar",
+                        hand.length > 12 ? "h-40 md:h-52 -space-x-4 md:-space-x-8 hover:-space-x-2 md:hover:-space-x-4" : 
+                        hand.length > 8 ? "h-40 md:h-52 -space-x-3 md:-space-x-6 hover:-space-x-1 md:hover:-space-x-2" : 
+                        "h-44 md:h-60 -space-x-2 md:-space-x-4 hover:space-x-1 md:hover:space-x-2"
                     )}>
                         <AnimatePresence>
                             {hand.map((card) => (
-                                <div key={card} className={`transition-all duration-300 hover:-translate-y-6 z-0 hover:z-10 ${sounds.isPlaying ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}>
+                                <div key={card} className={`transition-all duration-300 md:hover:-translate-y-2 z-0 md:hover:z-10 ${sounds.isPlaying ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}>
                                     <Card 
                                         value={card} 
                                         isPlayable={!sounds.isPlaying} 
@@ -592,9 +675,16 @@ function App() {
                             ))}
                         </AnimatePresence>
                     </div>
+                    <div className="text-center mt-2 text-slate-400 text-sm uppercase tracking-widest">Votre main</div>
                 </div>
             )}
         </div>
+        <RulesModal />
+        <PileHistoryModal 
+            isOpen={showPileHistory} 
+            onClose={() => setShowPileHistory(false)} 
+            pile={gameInfo.currentPile} 
+        />
     </motion.div>
   );
 }

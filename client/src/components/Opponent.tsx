@@ -1,34 +1,69 @@
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from './Card';
+import { useState } from 'react';
 
 interface OpponentProps {
     name: string;
     cardCount: number;
     hand?: number[];
     onForcePlay?: (card: number) => void;
+    canXray?: boolean;
 }
 
-export const Opponent = ({ name, cardCount, hand, onForcePlay }: OpponentProps) => {
+export const Opponent = ({ name, cardCount, hand, onForcePlay, canXray }: OpponentProps) => {
+    const [isHovered, setIsHovered] = useState(false);
+    const [isTapped, setIsTapped] = useState(false);
+
+    const showXray = (isHovered || isTapped) && hand && hand.length > 0 && canXray;
+
     return (
-        <div className="flex flex-col items-center gap-2 p-3 bg-slate-800/50 rounded-2xl border border-slate-700/50 backdrop-blur-sm min-w-[100px] group relative">
-            {/* Admin View: Hover to see cards */}
-            {hand && hand.length > 0 && (
-                <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-slate-900 p-4 rounded-xl border border-slate-600 shadow-2xl z-[100] hidden group-hover:flex flex-wrap gap-2 w-max max-w-[300px] justify-center">
-                    {hand.map(card => (
-                        <div 
-                            key={card} 
-                            className={`scale-75 origin-top ${onForcePlay ? 'cursor-pointer hover:scale-90 transition-transform' : ''}`}
-                            onClick={() => onForcePlay && onForcePlay(card)}
-                            title={onForcePlay ? "Forcer cette carte" : undefined}
-                        >
-                            <Card value={card} compact disableAnimations />
-                        </div>
-                    ))}
-                </div>
+        <>
+            {/* Backdrop pour fermer le X-Ray sur mobile */}
+            {isTapped && (
+                <div 
+                    className="fixed inset-0 z-[150] bg-transparent" 
+                    onClick={() => setIsTapped(false)}
+                />
             )}
+            
+            <div 
+                className="flex flex-col items-center gap-2 p-2 md:p-3 bg-slate-800/50 rounded-2xl border border-slate-700/50 backdrop-blur-sm min-w-[80px] md:min-w-[100px] relative transition-colors hover:bg-slate-800/80"
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
+                onClick={() => setIsTapped(!isTapped)}
+            >
+                {/* X-Ray View */}
+            <AnimatePresence>
+                {showXray && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
+                        className="absolute top-full mt-4 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-xl p-4 rounded-2xl border border-slate-500/50 shadow-2xl z-[200] flex flex-wrap gap-2 w-max max-w-[300px] md:max-w-[600px] justify-center"
+                    >
+                        {/* Petite flèche vers le haut */}
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-slate-900 border-t border-l border-slate-500/50 rotate-45" />
+                        
+                        {hand.map(card => (
+                            <div 
+                                key={card} 
+                                className={`scale-75 origin-top ${onForcePlay ? 'cursor-pointer hover:scale-90 transition-transform' : ''}`}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onForcePlay && onForcePlay(card);
+                                }}
+                                title={onForcePlay ? "Forcer cette carte" : undefined}
+                            >
+                                <Card value={card} compact disableAnimations />
+                            </div>
+                        ))}
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <div className="relative">
-                <div className="w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-xl md:text-2xl font-bold shadow-lg text-white">
+                <div className="w-10 h-10 md:w-16 md:h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-lg md:text-2xl font-bold shadow-lg text-white">
                     {name[0].toUpperCase()}
                 </div>
                 {/* Badge nombre de cartes */}
@@ -46,11 +81,12 @@ export const Opponent = ({ name, cardCount, hand, onForcePlay }: OpponentProps) 
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         className="w-4 h-6 md:w-6 md:h-9 rounded border-2 border-white/80 shadow-md"
-                        style={{ backgroundColor: '#e11d48' }} // Rouge The Mind
+                        style={{ backgroundColor: '#e11d48' }} // Rouge MindLink
                     />
                 ))}
                 {cardCount > 5 && <span className="text-xs text-slate-500 pl-1">...</span>}
             </div>
         </div>
+        </>
     );
 };

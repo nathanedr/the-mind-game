@@ -29,6 +29,7 @@ interface GameInfo {
         level: number;
     };
     trainingMode?: boolean;
+    invincibleMode?: boolean;
 }
 
 interface GameState {
@@ -47,6 +48,7 @@ interface GameState {
     setHand: (hand: number[]) => void;
     setGameInfo: (info: GameInfo) => void;
     setHostId: (hostId: string) => void;
+    setIsAdmin: (isAdmin: boolean) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -71,4 +73,5 @@ export const useGameStore = create<GameState>((set) => ({
     setHand: (hand) => set({ hand }),
     setGameInfo: (info) => set({ gameInfo: info }),
     setHostId: (hostId) => set({ hostId }),
+    setIsAdmin: (isAdmin) => set({ isAdmin }),
 }));

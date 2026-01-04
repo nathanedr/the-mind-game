@@ -4,6 +4,9 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 app.use(cors());
@@ -64,6 +67,7 @@ interface GameState {
         level: number;
     };
     trainingMode: boolean;
+    invincibleMode: boolean;
 }
 
 interface Room {
@@ -153,11 +157,18 @@ io.on('connection', (socket) => {
         const roomId = uuidv4().slice(0, 6).toUpperCase();
         
         let isAdmin = false;
-        if (playerName === "Nathinho") {
-            if (password === "TheMind16") {
+        const adminNames = (process.env.ADMIN_NAMES || "").split(',').map(n => n.trim());
+        const adminPassword = process.env.ADMIN_PASSWORD || "MindLink16";
+
+        console.log(`Create attempt: ${playerName}, AdminList: ${adminNames.join(',')}`);
+
+        if (adminNames.includes(playerName)) {
+            if (password === adminPassword) {
                 isAdmin = true;
-            } else {
+            } else if (password) {
                 return callback({ success: false, message: "Mot de passe incorrect" });
+            } else {
+                return callback({ success: false, message: "Mot de passe requis" });
             }
         }
 
@@ -186,7 +197,8 @@ io.on('connection', (socket) => {
                     proposedBy: null,
                     votes: {}
                 },
-                trainingMode: false
+                trainingMode: false,
+                invincibleMode: false
             },
             history: []
         };
@@ -204,7 +216,7 @@ io.on('connection', (socket) => {
     });
 
     // Rejoindre une room
-    socket.on('join_room', ({ roomId, playerName }: { roomId: string, playerName: string }, callback) => {
+    socket.on('join_room', ({ roomId, playerName, password }: { roomId: string, playerName: string, password?: string }, callback) => {
         const room = rooms[roomId];
         if (!room) {
             return callback({ success: false, message: "Room introuvable" });
@@ -216,14 +228,52 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: "Room complète" });
         }
 
+        let isAdmin = false;
+        const adminNames = (process.env.ADMIN_NAMES || "").split(',').map(n => n.trim());
+        const adminPassword = process.env.ADMIN_PASSWORD || "MindLink16";
+
+        const isNathinho = playerName === "Nathinho";
+        const isPlayerAdminCandidate = adminNames.includes(playerName);
+        
+        // Check if Nathinho is already in the room as admin
+        const nathinhoPresentAndAdmin = room.players.some(p => p.name === "Nathinho" && p.isAdmin);
+
+        console.log(`Join attempt: ${playerName}, Candidate: ${isPlayerAdminCandidate}, NathinhoAdmin: ${nathinhoPresentAndAdmin}`);
+
+        if (isPlayerAdminCandidate) {
+             // If Nathinho is already admin, and I am not Nathinho, I cannot be admin.
+             if (nathinhoPresentAndAdmin && !isNathinho) {
+                 isAdmin = false; 
+             } else {
+                 // Normal admin check
+                 if (password === adminPassword) {
+                     isAdmin = true;
+                 } else if (password) {
+                     return callback({ success: false, message: "Mot de passe incorrect" });
+                 } else {
+                     return callback({ success: false, message: "Mot de passe requis" });
+                 }
+             }
+        }
+
         const newPlayer: Player = { 
             id: socket.id, 
             name: playerName, 
             roomId, 
             hand: [], 
             isReady: false,
-            isAdmin: false
+            isAdmin
         };
+
+        // If the new player is Nathinho and he is Admin, demote everyone else
+        if (isNathinho && isAdmin) {
+            room.players.forEach(p => {
+                if (p.isAdmin) {
+                    p.isAdmin = false;
+                }
+            });
+        }
+
         room.players.push(newPlayer);
         players[socket.id] = newPlayer;
 
@@ -236,7 +286,13 @@ io.on('connection', (socket) => {
             io.to(admin.id).emit('admin_players_update', getFullPlayers(room));
         });
 
-        callback({ success: true, players: getSanitizedPlayers(room), gameState: room.gameState, hostId: room.hostId });
+        callback({ 
+            success: true, 
+            players: getSanitizedPlayers(room), 
+            gameState: room.gameState, 
+            hostId: room.hostId,
+            isAdmin 
+        });
     });
 
     // Actions Admin
@@ -264,6 +320,10 @@ io.on('connection', (socket) => {
             }
         } else if (type === 'toggleTraining') {
             room.gameState.trainingMode = !room.gameState.trainingMode;
+        } else if (type === 'toggleInvincible') {
+            room.gameState.invincibleMode = !room.gameState.invincibleMode;
+        } else if (type === 'broadcastMessage' && value) {
+            io.to(room.id).emit('game_message', { text: `📢 ADMIN: ${value}` });
         } else if (type === 'reset') {
             room.gameState.status = 'waiting';
             room.gameState.level = 1;
@@ -309,6 +369,48 @@ io.on('connection', (socket) => {
                 }
                 playCardLogic(room, targetPlayer, cardToPlay);
             }
+        } else if (type === 'renamePlayer' && targetId && value) {
+            const targetPlayer = room.players.find(p => p.id === targetId);
+            if (targetPlayer) {
+                targetPlayer.name = value;
+            }
+        } else if (type === 'skipLevel') {
+            // Vide les mains et la pile
+            room.players.forEach(p => p.hand = []);
+            room.gameState.currentPile = [];
+            
+            // Logique de fin de niveau (Bonus Vies/Shurikens)
+            const justFinishedLevel = room.gameState.level;
+            room.gameState.level += 1;
+
+            if (room.gameState.level > 12) {
+                room.gameState.status = 'won';
+                io.to(room.id).emit('game_over', { won: true });
+            } else {
+                // Bonus Shurikens (2, 5, 8)
+                if ([2, 5, 8].includes(justFinishedLevel)) {
+                    if (room.gameState.shurikens < 3) room.gameState.shurikens++;
+                }
+                // Bonus Vies
+                const numPlayers = room.players.length;
+                let maxLives = numPlayers < 3 ? 3 : (numPlayers <= 6 ? 4 : 5);
+                let lifeLevels = numPlayers < 3 ? [3, 6, 9] : (numPlayers <= 6 ? [3, 6, 9, 11] : [3, 6, 9, 10, 11]);
+
+                if (lifeLevels.includes(justFinishedLevel)) {
+                    if (room.gameState.lives < maxLives) room.gameState.lives++;
+                }
+
+                // Notifier tout le monde du succès
+                io.to(room.id).emit('game_message', { text: `⏩ Niveau ${justFinishedLevel} passé par l'admin !` });
+                
+                // Relancer le niveau suivant après court délai
+                setTimeout(() => {
+                    startLevel(room);
+                }, 1000);
+            }
+        } else if (type === 'distract') {
+            // Envoie un faux signal d'erreur pour faire trembler les écrans
+            io.to(room.id).emit('game_error', { message: "⚡ ATTENTION ! ⚡" });
         } else if (type === 'undo') {
             if (room.history.length > 0) {
                 const previousState = JSON.parse(room.history.pop()!);
@@ -370,7 +472,10 @@ io.on('connection', (socket) => {
 
         if (cardValue > lowestCardHeld) {
             // ERREUR !
-            room.gameState.lives -= 1;
+            if (!room.gameState.invincibleMode) {
+                room.gameState.lives -= 1;
+            }
+            
             io.to(room.id).emit('game_error', { 
                 wrongCard: cardValue, 
                 playedBy: player.name,

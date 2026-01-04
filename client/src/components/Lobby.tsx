@@ -10,16 +10,13 @@ export const Lobby = () => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLocked, setIsLocked] = useState(false);
+    const [authMode, setAuthMode] = useState<'create' | 'join' | null>(null);
     
     const setRoomInfo = useGameStore(state => state.setRoomInfo);
 
     const handleCreateClick = () => {
         if (!name) return alert('Entrez un pseudo');
-        if (name === "Nathinho") {
-            setShowPasswordModal(true);
-        } else {
-            createRoom();
-        }
+        createRoom();
     };
 
     const createRoom = (pwd?: string) => {
@@ -28,13 +25,18 @@ export const Lobby = () => {
             if (response.success) {
                 setRoomInfo(response.roomId, name, response.hostId, response.isAdmin);
             } else {
-                if (response.message === "Mot de passe incorrect") {
-                    setError("Mot de passe incorrect");
-                    setIsLocked(true);
-                    setTimeout(() => {
-                        setIsLocked(false);
-                        setError("");
-                    }, 3000); // 3 secondes de délai
+                if (response.message === "Mot de passe requis" || response.message === "Mot de passe incorrect") {
+                    if (response.message === "Mot de passe incorrect") {
+                        setError("Mot de passe incorrect");
+                        setIsLocked(true);
+                        setTimeout(() => {
+                            setIsLocked(false);
+                            setError("");
+                        }, 3000);
+                    } else {
+                        setShowPasswordModal(true);
+                        setAuthMode('create');
+                    }
                 } else {
                     alert(response.message);
                 }
@@ -44,18 +46,33 @@ export const Lobby = () => {
 
     const handlePasswordSubmit = () => {
         if (isLocked) return;
-        createRoom(password);
+        if (authMode === 'create') createRoom(password);
+        else if (authMode === 'join') joinRoom(password);
     };
 
-    const joinRoom = () => {
+    const joinRoom = (pwd?: string) => {
         if (!name || !roomCode) return alert('Entrez un pseudo et un code');
         socket.connect();
-        socket.emit('join_room', { roomId: roomCode, playerName: name }, (response: any) => {
+        socket.emit('join_room', { roomId: roomCode, playerName: name, password: pwd }, (response: any) => {
             if (response.success) {
-                setRoomInfo(roomCode, name, response.hostId, false);
+                setRoomInfo(roomCode, name, response.hostId, response.isAdmin);
             } else {
-                alert(response.message);
-                socket.disconnect();
+                if (response.message === "Mot de passe requis" || response.message === "Mot de passe incorrect") {
+                    if (response.message === "Mot de passe incorrect") {
+                        setError("Mot de passe incorrect");
+                        setIsLocked(true);
+                        setTimeout(() => {
+                            setIsLocked(false);
+                            setError("");
+                        }, 3000);
+                    } else {
+                        setShowPasswordModal(true);
+                        setAuthMode('join');
+                    }
+                } else {
+                    alert(response.message);
+                    socket.disconnect();
+                }
             }
         });
     };
@@ -94,9 +111,9 @@ export const Lobby = () => {
                 </div>
             )}
 
-            <h1 className="text-6xl font-bold tracking-tighter">THE MIND</h1>
+            <img src="/MindLink_logo.png" alt="MindLink Logo" className="w-48 md:w-64 h-auto mb-4" />
             
-            <div className="flex flex-col gap-4 w-80">
+            <div className="flex flex-col gap-4 w-72 md:w-80">
                 <input 
                     type="text" 
                     placeholder="Votre Pseudo" 
@@ -123,7 +140,7 @@ export const Lobby = () => {
                         onChange={e => setRoomCode(e.target.value.toUpperCase())}
                     />
                     <button 
-                        onClick={joinRoom}
+                        onClick={() => joinRoom()}
                         className="p-3 bg-blue-600 hover:bg-blue-500 rounded font-bold transition-colors"
                     >
                         REJOINDRE
