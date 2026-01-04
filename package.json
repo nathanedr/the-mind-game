@@ -1,0 +1,12 @@
+{
+  "name": "the-mind-fullstack",
+  "version": "1.0.0",
+  "scripts": {
+    "postinstall": "cd client && npm install && cd ../server && npm install",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "start": "cd server && npm start"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
