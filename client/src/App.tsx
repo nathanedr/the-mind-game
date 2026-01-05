@@ -11,6 +11,7 @@ import { PileHistoryModal } from './components/PileHistoryModal';
 import { useGameSounds } from './hooks/useGameSounds.ts';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
+import confetti from 'canvas-confetti';
 
 function App() {
   const { 
@@ -35,6 +36,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [kicked, setKicked] = useState(false);
   const [showPileHistory, setShowPileHistory] = useState(false);
+  const [gif67, setGif67] = useState<string | null>(null);
   
   // Admin X-Ray features
   const [xrayEnabled, setXrayEnabled] = useState(false);
@@ -127,8 +129,69 @@ function App() {
         }
     }
 
-    function onCardPlayed(_data: { card: number, player: string }) {
-        sounds.playCardSound();
+    function onCardPlayed(data: { card: number, player: string }) {
+        if (data.card === 67) {
+            const randomGif = `67_${Math.floor(Math.random() * 8) + 1}.gif`;
+            setGif67(randomGif);
+            sounds.play67Sound().then(() => {
+                setGif67(null);
+            });
+        } else {
+            sounds.playCardSound();
+        }
+    }
+
+    function onLevelWon(data: { level: number, soundId: number }) {
+        let stopConfetti = false;
+
+        // 1. Lancer les confettis (boucle tant que le son joue)
+        (function frame() {
+            if (stopConfetti) return;
+
+            confetti({
+                particleCount: 5,
+                angle: 60,
+                spread: 55,
+                origin: { x: 0 },
+                colors: ['#10b981', '#34d399', '#fbbf24'] // Emerald & Yellow
+            });
+            confetti({
+                particleCount: 5,
+                angle: 120,
+                spread: 55,
+                origin: { x: 1 },
+                colors: ['#10b981', '#34d399', '#fbbf24']
+            });
+
+            requestAnimationFrame(frame);
+        }());
+
+        // 2. Jouer le son synchronisé avec gestion robuste
+        const audio = new Audio(`/sounds/roundwinning${data.soundId}.mp3`);
+        audio.volume = sounds.volume;
+        
+        let nextLevelTriggered = false;
+        const triggerNextLevel = () => {
+            stopConfetti = true;
+            if (!nextLevelTriggered && socket.id === hostId) {
+                nextLevelTriggered = true;
+                socket.emit('start_next_level');
+            }
+        };
+
+        audio.onended = () => {
+            triggerNextLevel();
+        };
+
+        // Cas 1: Fichier manquant ou erreur de chargement
+        audio.onerror = () => {
+            setTimeout(triggerNextLevel, 2000); // Délai de secours
+        };
+
+        // Cas 2: Lecture bloquée par le navigateur (Autoplay policy)
+        audio.play().catch(() => {
+            setTimeout(triggerNextLevel, 2000); // Délai de secours
+        });
     }
 
     socket.on('connect', onConnect);
@@ -143,6 +206,7 @@ function App() {
     socket.on('game_message', onGameMessage);
     socket.on('game_over', onGameOver);
     socket.on('card_played', onCardPlayed);
+    socket.on('level_won', onLevelWon);
 
     return () => {
       socket.off('connect', onConnect);
@@ -157,8 +221,9 @@ function App() {
       socket.off('game_message', onGameMessage);
       socket.off('game_over', onGameOver);
       socket.off('card_played', onCardPlayed);
+      socket.off('level_won', onLevelWon);
     };
-  }, []);
+  }, [setPlayers, setConnected, setHand, setGameInfo, setHostId, setIsAdmin, sounds, hostId]);
 
   const startGame = () => {
       setHand([]); // Vider la main localement pour éviter les glitchs visuels
@@ -235,6 +300,24 @@ function App() {
     >
         <Notification message={notification} onClose={closeNotification} />
         
+        {/* 67 EVENT OVERLAY */}
+        <AnimatePresence>
+            {gif67 && (
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+                >
+                    <img 
+                        src={`/67/${gif67}`} 
+                        alt="67 Celebration" 
+                        className="max-w-[90vw] max-h-[80vh] rounded-xl shadow-2xl border-4 border-yellow-500 object-contain"
+                    />
+                </motion.div>
+            )}
+        </AnimatePresence>
+
         {/* PAUSE OVERLAY */}
         {gameInfo.status === 'paused' && (
             <div className="absolute inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center pointer-events-none">
@@ -244,7 +327,7 @@ function App() {
 
         {/* SHURIKEN REVEAL OVERLAY */}
         {gameInfo.status === 'shuriken_reveal' && gameInfo.shurikenRevealData && (
-            <div className="absolute inset-0 z-50 bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center p-8">
+            <div className="absolute inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center p-8">
                 <h2 className="text-3xl md:text-4xl font-bold text-yellow-400 mb-8 animate-pulse">SHURIKEN !</h2>
                 <div className="text-xl text-slate-300 mb-8">Cartes les plus faibles défaussées :</div>
                 
@@ -335,15 +418,6 @@ function App() {
                         title={`Volume: ${Math.round(sounds.volume * 100)}%`}
                     />
                 </div>
-                {/* Admin Toggle */}
-                {isAdmin && (
-                    <button 
-                        onClick={() => setShowAdminPanel(!showAdminPanel)}
-                        className="mt-2 text-xs bg-red-900/50 text-red-200 px-2 py-1 rounded border border-red-700 hover:bg-red-900 z-[70] relative"
-                    >
-                        {showAdminPanel ? "Masquer Admin" : "Panneau Admin"}
-                    </button>
-                )}
             </div>
             
             {(gameInfo.status === 'playing' || gameInfo.status === 'paused' || gameInfo.status === 'shuriken_reveal') && (
@@ -363,6 +437,17 @@ function App() {
                 </div>
             )}
         </header>
+
+        {/* ADMIN TOGGLE BUTTON (Fixed Bottom Left) */}
+        {isAdmin && (
+            <button 
+                onClick={() => setShowAdminPanel(!showAdminPanel)}
+                className="fixed bottom-4 left-4 z-[60] bg-red-900/80 text-red-200 p-3 rounded-full border border-red-700 hover:bg-red-800 shadow-lg transition-all hover:scale-110"
+                title="Panneau Admin"
+            >
+                <span className="text-xl">🛡️</span>
+            </button>
+        )}
 
         {/* ADMIN PANEL */}
         {isAdmin && showAdminPanel && (
@@ -489,7 +574,7 @@ function App() {
             
             {/* OPPONENTS AREA (TOP) */}
             {(gameInfo.status === 'playing' || gameInfo.status === 'paused' || gameInfo.status === 'shuriken_reveal') && (
-                <div className="flex justify-center gap-4 w-full flex-wrap mb-4 relative z-50">
+                <div className="flex justify-center gap-4 w-full flex-wrap mt-2 mb-16 relative z-50">
                     {opponents.map(opponent => (
                         <Opponent 
                             key={opponent.id} 
@@ -611,32 +696,182 @@ function App() {
                         )}
                     </AnimatePresence>
 
-                    {/* PILE CENTRALE */}
-                    <div 
-                        className="relative w-32 h-48 md:w-48 md:h-72 flex items-center justify-center cursor-pointer group"
-                        onClick={() => setShowPileHistory(true)}
-                        title="Voir l'historique de la pile"
-                    >
-                        {/* Placeholder pour la pile vide */}
-                        <div className="absolute inset-0 border-4 border-dashed border-slate-700 rounded-xl flex items-center justify-center group-hover:border-slate-500 transition-colors">
-                            <span className="text-slate-700 font-bold text-lg md:text-xl group-hover:text-slate-500 transition-colors">PILE</span>
+                    {/* CONTAINER PILES (Main + Discard + Shuriken History) */}
+                    <div className="flex items-center justify-center gap-8 md:gap-16 relative">
+                        
+                        {/* HISTORIQUE SHURIKEN (LEFT) */}
+                        <div className="absolute right-full mr-4 md:mr-16 top-1/2 -translate-y-1/2 flex gap-3 md:gap-4 items-center flex-row-reverse">
+                            <AnimatePresence>
+                                {gameInfo.shurikenUsageHistory?.map((event, idx) => (
+                                    <motion.div 
+                                        key={idx}
+                                        initial={{ opacity: 0, scale: 0.5, x: 20 }}
+                                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                                        exit={{ opacity: 0, scale: 0.5 }}
+                                        className="relative group cursor-pointer"
+                                        onClick={() => {
+                                            const details = event.discardedCards.map(d => `${d.player}: ${d.card}`).join(', ');
+                                            setNotification(`Shuriken utilisé ! Cartes : ${details}`);
+                                        }}
+                                    >
+                                        {/* Container for this specific shuriken event */}
+                                        <div className="relative w-12 h-16 md:w-14 md:h-20">
+                                            
+                                            {/* The discarded cards stacked */}
+                                            {event.discardedCards.map((data, i) => {
+                                                const offset = Math.min(i, 5) * 2;
+                                                return (
+                                                    <div 
+                                                        key={data.card}
+                                                        className="absolute inset-0 bg-slate-800 border border-slate-600 rounded-md shadow-sm flex items-center justify-center"
+                                                        style={{ 
+                                                            transform: `translate(${offset}px, ${offset}px)`,
+                                                            zIndex: i
+                                                        }}
+                                                    >
+                                                        <span className="text-slate-500 text-[10px] font-mono">{data.card}</span>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {/* Shuriken Icon on top */}
+                                            <div 
+                                                className="absolute -top-3 -right-3 w-8 h-8 bg-slate-900 rounded-full border-2 border-blue-500 flex items-center justify-center z-20 shadow-lg"
+                                                style={{ 
+                                                    transform: `translate(${Math.min(event.discardedCards.length, 5) * 2}px, ${Math.min(event.discardedCards.length, 5) * 2}px)`
+                                                }}
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-blue-400">
+                                                    <path d="M12 2.5L14.8 9.2L21.5 12L14.8 14.8L12 21.5L9.2 14.8L2.5 12L9.2 9.2L12 2.5Z" />
+                                                    <circle cx="12" cy="12" r="2.5" className="text-slate-900" fill="currentColor"/>
+                                                </svg>
+                                            </div>
+                                        </div>
+
+                                        {/* Tooltip */}
+                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max max-w-[200px] bg-slate-900/95 border border-blue-500/30 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 backdrop-blur-xl hidden md:block">
+                                            <div className="text-[10px] text-blue-400 font-bold mb-1 border-b border-blue-900/50 pb-1 text-center">SHURIKEN</div>
+                                            <div className="flex flex-col gap-1">
+                                                {event.discardedCards.map(d => (
+                                                    <div key={d.card} className="flex justify-between gap-4 text-[10px] text-slate-300">
+                                                        <span>{d.player}</span>
+                                                        <span className="font-mono font-bold text-slate-200">{d.card}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
                         </div>
 
-                        {/* Cartes jouées */}
-                        <AnimatePresence>
-                            {gameInfo.currentPile.map((val) => (
-                                <div key={val} className="absolute inset-0">
-                                    <Card 
-                                        value={val} 
-                                        isPile={true} 
-                                    />
-                                </div>
-                            ))}
-                        </AnimatePresence>
-                        
-                        {/* Indication visuelle au survol */}
-                        <div className="absolute -bottom-12 md:-bottom-16 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-slate-400 text-xs md:text-sm flex items-center gap-1 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700 backdrop-blur-sm pointer-events-none z-[100] whitespace-nowrap">
-                            <span>🔍</span> Cliquer sur la pile pour voir l'historique
+                        {/* PILE CENTRALE */}
+                        <div 
+                            className="relative w-32 h-48 md:w-48 md:h-72 flex items-center justify-center cursor-pointer group"
+                            onClick={() => setShowPileHistory(true)}
+                            title="Voir l'historique de la pile"
+                        >
+                            {/* Placeholder pour la pile vide */}
+                            <div className="absolute inset-0 border-4 border-dashed border-slate-700 rounded-xl flex items-center justify-center group-hover:border-slate-500 transition-colors">
+                                <span className="text-slate-700 font-bold text-lg md:text-xl group-hover:text-slate-500 transition-colors">PILE</span>
+                            </div>
+
+                            {/* Cartes jouées */}
+                            <AnimatePresence>
+                                {gameInfo.currentPile.map((val) => (
+                                    <div key={val} className="absolute inset-0">
+                                        <Card 
+                                            value={val} 
+                                            isPile={true} 
+                                        />
+                                    </div>
+                                ))}
+                            </AnimatePresence>
+                            
+                            {/* Indication visuelle au survol */}
+                            <div className="absolute -bottom-12 md:-bottom-16 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-slate-400 text-xs md:text-sm flex items-center gap-1 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700 backdrop-blur-sm pointer-events-none z-35 whitespace-nowrap">
+                                <span>🔍</span> Cliquer sur la pile pour voir l'historique
+                            </div>
+
+                            {/* Indicateur du dernier joueur */}
+                            <AnimatePresence>
+                                {gameInfo.lastPlayedBy && (
+                                    <motion.div 
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: 10 }}
+                                        className="absolute -top-8 md:-top-10 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-600 px-3 py-1 rounded-full shadow-lg z-40 whitespace-nowrap"
+                                    >
+                                        <span className="text-[10px] md:text-xs text-slate-400 uppercase tracking-wider mr-1">Joué par</span>
+                                        <span className="text-xs md:text-sm font-bold text-emerald-400">{gameInfo.lastPlayedBy}</span>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+
+                        {/* PILE DE DÉFAUSSE (BURNED CARDS) - Version Multi-Vies */}
+                        <div className="absolute left-full ml-4 md:ml-16 top-1/2 -translate-y-1/2 flex gap-3 md:gap-4 items-center">
+                            <AnimatePresence>
+                                {gameInfo.discardedPile?.map((event, idx) => (
+                                    <motion.div 
+                                        key={idx}
+                                        initial={{ opacity: 0, scale: 0.5, x: -20 }}
+                                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                                        exit={{ opacity: 0, scale: 0.5 }}
+                                        className="relative group cursor-pointer"
+                                        onClick={() => {
+                                            const discardedList = event.discarded.length > 0 ? event.discarded.join(', ') : 'Aucune';
+                                            setNotification(`Vie perdue ! Cause: ${event.causedBy}, Oubliées: ${discardedList}`);
+                                        }}
+                                    >
+                                        {/* Container for this specific life-loss event */}
+                                        <div className="relative w-12 h-16 md:w-14 md:h-20">
+                                            
+                                            {/* The 'Victim' cards (discarded) stacked underneath */}
+                                            {event.discarded.map((val, i) => {
+                                                // Cap the visual offset to avoid infinite growing (max 5 steps)
+                                                const offset = Math.min(i, 5) * 2;
+                                                return (
+                                                    <div 
+                                                        key={val}
+                                                        className="absolute inset-0 bg-slate-800 border border-slate-600 rounded-md shadow-sm flex items-center justify-center"
+                                                        style={{ 
+                                                            transform: `translate(${offset}px, ${offset}px)`,
+                                                            zIndex: i
+                                                        }}
+                                                    >
+                                                        <span className="text-slate-500 text-[10px] font-mono">{val}</span>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {/* The 'Killer' card (causedBy) on top */}
+                                            <div 
+                                                className="absolute inset-0 bg-red-950 border-2 border-red-500 rounded-md shadow-md flex items-center justify-center"
+                                                style={{ 
+                                                    transform: `translate(${Math.min(event.discarded.length, 5) * 2}px, ${Math.min(event.discarded.length, 5) * 2}px)`,
+                                                    zIndex: event.discarded.length + 10
+                                                }}
+                                            >
+                                                <span className="text-red-500 font-bold text-sm md:text-base">{event.causedBy}</span>
+                                                <div className="absolute -top-2 -right-2 bg-slate-900 rounded-full p-0.5 border border-red-900">
+                                                    <span className="text-[10px]">☠</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Tooltip */}
+                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max max-w-[150px] bg-slate-900/95 border border-red-500/30 p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 backdrop-blur-xl hidden md:block text-center">
+                                            <div className="text-[10px] text-red-400 font-bold mb-1">ERREUR : {event.causedBy}</div>
+                                            {event.discarded.length > 0 && (
+                                                <div className="text-[10px] text-slate-400">
+                                                    Oubliées : {event.discarded.join(', ')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
                         </div>
                     </div>
                 </div>
@@ -649,10 +884,18 @@ function App() {
                     {gameInfo.shurikens > 0 && !gameInfo.shurikenVote?.active && (
                         <button 
                             onClick={proposeShuriken}
-                            className="absolute -top-16 right-4 md:right-0 w-12 h-12 md:w-16 md:h-16 bg-slate-800 border-2 border-yellow-400 rounded-full flex items-center justify-center hover:bg-slate-700 transition-colors shadow-lg group"
+                            className="absolute -top-20 right-4 md:right-0 w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-slate-800 to-slate-950 border border-yellow-500/50 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(234,179,8,0.3)] hover:shadow-[0_0_30px_rgba(234,179,8,0.6)] hover:scale-105 hover:-translate-y-1 transition-all duration-300 group z-40 overflow-hidden"
                             title="Proposer un Shuriken"
                         >
-                            <span className="text-2xl md:text-3xl group-hover:scale-110 transition-transform">★</span>
+                            {/* Background Glow */}
+                            <div className="absolute inset-0 bg-yellow-500/10 group-hover:bg-yellow-500/20 transition-colors" />
+                            
+                            {/* Shuriken Icon */}
+                            <div className="relative w-8 h-8 md:w-10 md:h-10 text-yellow-400 group-hover:rotate-180 transition-transform duration-700 ease-in-out drop-shadow-[0_0_8px_rgba(234,179,8,0.8)]">
+                                <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
+                                    <path d="M12 0L15 9L24 12L15 15L12 24L9 15L0 12L9 9L12 0Z" />
+                                </svg>
+                            </div>
                         </button>
                     )}
 

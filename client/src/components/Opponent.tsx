@@ -27,7 +27,7 @@ export const Opponent = ({ name, cardCount, hand, onForcePlay, canXray }: Oppone
             )}
             
             <div 
-                className="flex flex-col items-center gap-2 p-2 md:p-3 bg-slate-800/50 rounded-2xl border border-slate-700/50 backdrop-blur-sm min-w-[80px] md:min-w-[100px] relative transition-colors hover:bg-slate-800/80"
+                className="flex flex-col items-center gap-2 p-2 md:p-3 bg-slate-800/50 rounded-2xl border border-slate-700/50 backdrop-blur-sm w-24 md:w-32 relative transition-colors hover:bg-slate-800/80"
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onClick={() => setIsTapped(!isTapped)}
@@ -71,7 +71,7 @@ export const Opponent = ({ name, cardCount, hand, onForcePlay, canXray }: Oppone
                     {cardCount}
                 </div>
             </div>
-            <div className="font-medium text-slate-300 text-sm md:text-base truncate max-w-[120px]">{name}</div>
+            <div className="font-medium text-slate-300 text-xs md:text-sm truncate w-full text-center px-1" title={name}>{name}</div>
             
             {/* Représentation visuelle des cartes (Dos) */}
             <div className="flex -space-x-2 h-6 md:h-8 items-center justify-center">

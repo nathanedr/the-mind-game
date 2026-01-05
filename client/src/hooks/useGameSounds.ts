@@ -28,6 +28,26 @@ export const useGameSounds = () => {
         }
     }, [volume]);
 
+    const play67Sound = useCallback(() => {
+        return new Promise<void>((resolve) => {
+            const audio = new Audio('/67/67.mp3');
+            audio.volume = volume;
+            setIsPlaying(true); // Block interactions
+            
+            const onEnd = () => {
+                setIsPlaying(false);
+                resolve();
+            };
+            
+            audio.onended = onEnd;
+            audio.onerror = onEnd;
+
+            audio.play().catch(() => {
+                onEnd();
+            });
+        });
+    }, [volume]);
+
     return {
         volume,
         setVolume,
@@ -38,5 +58,6 @@ export const useGameSounds = () => {
         playLoseSound: () => playSound(['lose1.mp3', 'lose2.mp3', 'lose3.mp3', 'lose4.mp3', 'lose5.mp3']),
         playShurikenSound: () => playSound(['shuriken.mp3'], true),
         playJoinSound: () => playSound(['join.mp3']),
+        play67Sound
     };
 };

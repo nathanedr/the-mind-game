@@ -15,6 +15,9 @@ interface GameInfo {
     lives: number;
     shurikens: number;
     currentPile: number[];
+    discardedPile?: { causedBy: number, discarded: number[] }[];
+    shurikenUsageHistory?: { discardedCards: { player: string, card: number }[] }[];
+    lastPlayedBy?: string | null;
     shurikenVote?: {
         active: boolean;
         proposedBy: string | null;

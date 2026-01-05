@@ -81,6 +81,9 @@ interface GameState {
         discardedCards: { player: string, card: number }[];
         readyPlayers: string[];
     };
+    shurikenUsageHistory: { discardedCards: { player: string, card: number }[] }[]; // Historique des shurikens utilisés dans le niveau
+    discardedPile: { causedBy: number, discarded: number[] }[]; // Cartes brûlées suite à une erreur (groupées par événement)
+    lastPlayedBy?: string | null; // Nom du joueur ayant posé la dernière carte sur la pile
     lastGameResult?: {
         won: boolean;
         level: number;
@@ -149,6 +152,9 @@ const startLevel = (room: Room) => {
     });
 
     room.gameState.currentPile = [];
+    room.gameState.discardedPile = [];
+    room.gameState.shurikenUsageHistory = [];
+    room.gameState.lastPlayedBy = null;
     
     // Notifier tout le monde
     io.to(room.id).emit('game_update', {
@@ -170,6 +176,18 @@ const startLevel = (room: Room) => {
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
+
+    // Listener pour lancer le niveau suivant (déclenché par l'hôte après la fin du son)
+    socket.on('start_next_level', () => {
+        const roomId = Object.keys(rooms).find(id => rooms[id].players.some(p => p.id === socket.id));
+        if (roomId) {
+            const room = rooms[roomId];
+            // Sécurité : Seul l'hôte peut lancer le niveau suivant
+            if (room.hostId === socket.id) {
+                startLevel(room);
+            }
+        }
+    });
 
     // Créer une room
     socket.on('create_room', ({ playerName, password }: { playerName: string, password?: string }, callback) => {
@@ -216,6 +234,9 @@ io.on('connection', (socket) => {
                     proposedBy: null,
                     votes: {}
                 },
+                shurikenUsageHistory: [],
+                discardedPile: [],
+                lastPlayedBy: null,
                 trainingMode: false,
                 invincibleMode: false
             },
@@ -422,10 +443,12 @@ io.on('connection', (socket) => {
                 // Notifier tout le monde du succès
                 io.to(room.id).emit('game_message', { text: `⏩ Niveau ${justFinishedLevel} passé par l'admin !` });
                 
-                // Relancer le niveau suivant après court délai
-                setTimeout(() => {
-                    startLevel(room);
-                }, 1000);
+                // Célébration Skip Level
+                const soundId = Math.floor(Math.random() * 10) + 1;
+                io.to(room.id).emit('level_won', { 
+                    level: room.gameState.level, 
+                    soundId: soundId 
+                });
             }
         } else if (type === 'distract') {
             // Envoie un faux signal d'erreur pour faire trembler les écrans
@@ -516,13 +539,22 @@ io.on('connection', (socket) => {
                 // On retire la carte jouée (même si erreur) ET toutes les cartes inférieures
                 player.hand = player.hand.filter(c => c !== cardValue);
                 
+                const allDiscardedForThisEvent: number[] = [];
+
                 room.players.forEach(p => {
                     const discarded = p.hand.filter(c => c < cardValue);
                     if (discarded.length > 0) {
+                        allDiscardedForThisEvent.push(...discarded);
                         p.hand = p.hand.filter(c => c >= cardValue);
                     }
                 });
                 
+                // Ajout de l'événement de défausse (Cause + Conséquences)
+                room.gameState.discardedPile.push({
+                    causedBy: cardValue,
+                    discarded: allDiscardedForThisEvent.sort((a, b) => a - b)
+                });
+
                 // Mise à jour des mains
                 room.players.forEach(p => {
                     io.to(p.id).emit('hand_update', p.hand);
@@ -532,6 +564,7 @@ io.on('connection', (socket) => {
             // SUCCÈS
             player.hand = player.hand.filter(c => c !== cardValue);
             room.gameState.currentPile.push(cardValue);
+            room.gameState.lastPlayedBy = player.name;
             
             io.to(player.id).emit('hand_update', player.hand);
             io.to(room.id).emit('card_played', { card: cardValue, player: player.name });
@@ -580,9 +613,18 @@ io.on('connection', (socket) => {
                     }
                 }
                 
-                setTimeout(() => {
-                    startLevel(room);
-                }, 2000);
+                // CÉLÉBRATION & SYNCHRONISATION SONORE
+                // On choisit un son aléatoire (1-10)
+                const soundId = Math.floor(Math.random() * 10) + 1;
+                
+                // On notifie tout le monde de la victoire du niveau avec l'ID du son
+                io.to(room.id).emit('level_won', { 
+                    level: room.gameState.level, 
+                    soundId: soundId 
+                });
+
+                // NOTE: On ne lance plus startLevel() ici via setTimeout.
+                // C'est l'hôte qui enverra 'start_next_level' quand son son sera fini.
             }
         }
 
@@ -741,6 +783,11 @@ io.on('connection', (socket) => {
         if (room.gameState.shurikenRevealData.readyPlayers.length === room.players.length) {
             room.gameState.status = 'playing';
             const discardedCards = room.gameState.shurikenRevealData.discardedCards; // Keep ref for logic check
+            
+            // Ajouter à l'historique des shurikens
+            if (!room.gameState.shurikenUsageHistory) room.gameState.shurikenUsageHistory = [];
+            room.gameState.shurikenUsageHistory.push({ discardedCards });
+
             room.gameState.shurikenRevealData = undefined;
 
             // Vérifier fin de niveau (Copie de la logique de play_card)
@@ -812,9 +859,21 @@ io.on('connection', (socket) => {
             const room = rooms[player.roomId];
             if (room) {
                 room.players = room.players.filter(p => p.id !== socket.id);
+                
                 if (room.players.length === 0) {
                     delete rooms[player.roomId];
                 } else {
+                    // Si l'hôte est parti, on en désigne un nouveau
+                    if (room.hostId === socket.id) {
+                        room.hostId = room.players[0].id;
+                        // On notifie tout le monde du changement d'hôte
+                        io.to(player.roomId).emit('game_update', {
+                            gameState: room.gameState,
+                            players: getSanitizedPlayers(room),
+                            hostId: room.hostId
+                        });
+                    }
+                    
                     io.to(player.roomId).emit('update_players', getSanitizedPlayers(room));
                 }
             }
